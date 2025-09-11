@@ -15,6 +15,7 @@ from astrbot.core.message.components import (
     BaseMessageComponent,
     File,
     Image,
+    Nodes,
     Node,
     Plain,
     Reply,
@@ -301,17 +302,23 @@ class GsCoreAdapter(Star):
                             Image.fromBase64(_c.data),  # type: ignore
                         )
                 elif _c.type == 'node':
-                    if bot_id == 'aiocqhttp':
-                        node_message: List[GsMessage] = []
+                    # 特殊处理 qq 平台
+                    if bot_id == 'onebot':
+                        node_message: List[Node] = []
                         for _node in _c.data:
-                            node_message.append(GsMessage(**_node))
-
-                        message.append(
-                            Node(
-                                await self._to_msg(
-                                    node_message,
-                                    bot_id,
+                            node_message.append(
+                                Node(
+                                    await self._to_msg(
+                                        [GsMessage(**_node)],
+                                        bot_id,
+                                    )
                                 )
+                            )
+
+                        # 将一条消息转为多条消息，优化观感
+                        message.append(
+                            Nodes(
+                                node_message,
                             )
                         )
                     else:
