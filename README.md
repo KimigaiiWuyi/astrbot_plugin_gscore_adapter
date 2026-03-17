@@ -15,7 +15,7 @@
 ## 配置补充
 
 - `GSCORE_ONLY_PREFIXES`：可选字符串列表。
-  - 示例：`["/core", "/gs"]`
+  - 示例：`["core", "gs", "sr", "zzz", "ww"]`
   - 当用户消息文本命中这些前缀时，消息仅会发送给 GsCore，并显式调用 `event.stop_event()` 阻断后续 LLM 流程。
 
 ## 优点&特色
