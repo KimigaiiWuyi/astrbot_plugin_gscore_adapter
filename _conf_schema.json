@@ -26,7 +26,7 @@
     "GSCORE_ONLY_PREFIXES": {
         "description": "仅转发到GsCore且拦截AstrBot后续LLM的触发前缀列表",
         "type": "list",
-        "hint": "例如: /core, /gs",
+        "hint": "例如: core, gs, sr, zzz, ww，每条输入后回车",
         "default": []
     }
 }
