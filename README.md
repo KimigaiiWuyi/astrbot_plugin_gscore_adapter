@@ -12,6 +12,12 @@
 
 **🎉 [详细文档](https://docs.sayu-bot.com)** ( [快速开始(安装)](https://docs.sayu-bot.com/Started/InstallCore.html) | [链接Bot](https://docs.sayu-bot.com/LinkBots/AdapterList.html) | [插件市场](https://docs.sayu-bot.com/InstallPlugins/PluginsList.html) )
 
+## 配置补充
+
+- `GSCORE_ONLY_PREFIXES`：可选字符串列表。
+  - 示例：`["/core", "/gs"]`
+  - 当用户消息文本命中这些前缀时，消息仅会发送给 GsCore，并显式调用 `event.stop_event()` 阻断后续 LLM 流程。
+
 ## 优点&特色
 
 - 🔀 **异步优先**：异步处理~~大量~~消息流，不会阻塞任务运行
