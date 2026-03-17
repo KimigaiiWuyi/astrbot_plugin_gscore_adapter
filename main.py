@@ -49,6 +49,25 @@ class GsCoreAdapter(Star):
         self.IP = self.config.IP
         self.PORT = self.config.PORT
         self.WS_TOKEN = self.config.WS_TOKEN
+        self.GSCORE_ONLY_PREFIXES = [
+            prefix
+            for prefix in getattr(self.config, "GSCORE_ONLY_PREFIXES", [])
+            if isinstance(prefix, str) and prefix
+        ]
+
+    def _is_gscore_only_message(self, event: AstrMessageEvent) -> bool:
+        if not self.GSCORE_ONLY_PREFIXES:
+            return False
+
+        raw_text = event.message_str.lstrip()
+        if not raw_text:
+            return False
+
+        return any(raw_text.startswith(prefix) for prefix in self.GSCORE_ONLY_PREFIXES)
+
+    def _stop_event_continue(self, event: AstrMessageEvent):
+        """按 AstrBot 文档显式阻断事件传播。"""
+        event.stop_event()
 
     async def async_connect(
         self,
@@ -218,6 +237,12 @@ class GsCoreAdapter(Star):
         )
         logger.info(f"【发送】[gsuid-core]: {msg.bot_id}")
         await self._input(msg)
+
+        if self._is_gscore_only_message(event):
+            self._stop_event_continue(event)
+            logger.info(
+                "[GsCore] 当前消息命中GSCORE_ONLY_PREFIXES，已调用 stop_event() 拦截后续 AstrBot LLM 流程"
+            )
 
     async def _input(self, msg: MessageReceive):
         await self.msg_list.put(msg)
