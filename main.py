@@ -60,7 +60,7 @@ class GsCoreAdapter(Star):
 
         logger.info(f"Bot_ID: {self.BOT_ID}连接至[gsuid-core]: {self.ws_url}...")
         self.ws = await websockets.client.connect(  # type: ignore
-            self.ws_url, max_size=2**26, open_timeout=60, ping_timeout=60
+            self.ws_url, max_size=2**26, open_timeout=3, ping_timeout=10
         )
         logger.info(f"与[gsuid-core]成功连接! Bot_ID: {self.BOT_ID}")
         self.is_connect = True
@@ -75,12 +75,12 @@ class GsCoreAdapter(Star):
                 await self.async_connect()
                 logger.info("[gsuid-core]: 发起一次连接")
                 await self.start()
-                gsconnecting = False
-            except ConnectionRefusedError:
-                gsconnecting = False
+            except Exception as e:
                 logger.error(
-                    "[链接错误] Core服务器连接失败...请确认是否根据文档安装【早柚核心】！"
+                    f"[链接错误] Core服务器连接失败: {e} ...请确认是否根据文档安装【早柚核心】！"
                 )
+            finally:
+                gsconnecting = False
 
     async def _convert_image(self, image_msg: Image):
         img_path = getattr(image_msg, "path", None) or getattr(image_msg, "url", None)
@@ -113,12 +113,6 @@ class GsCoreAdapter(Star):
             logger.error(
                 "[链接错误] Core服务器连接失败...请确认是否根据文档安装【早柚核心】！"
             )
-
-        assert self.ws is not None
-        try:
-            await self.ws.ping()
-        except ConnectionClosed:
-            await self.connect()
 
         user_name = event.get_sender_name()
 
@@ -220,6 +214,9 @@ class GsCoreAdapter(Star):
         await self._input(msg)
 
     async def _input(self, msg: MessageReceive):
+        if not hasattr(self, "msg_list"):
+            logger.warning("[GsCore] 尚未连接，消息丢弃")
+            return
         await self.msg_list.put(msg)
 
     async def send_msg(self):
