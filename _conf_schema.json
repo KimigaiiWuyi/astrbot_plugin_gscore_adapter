@@ -31,7 +31,7 @@
     },
     "MAX_RETRY_TIMES": {
         "description": "GsCore连接断开后的最大重试次数",
-        "type": "integer",
+        "type": "int",
         "hint": "默认30次，-1为无限重试",
         "default": 30
     }
