@@ -38,7 +38,7 @@ gsconnecting = False
     "astrbot_plugin_gscore_adapter",
     "KimigaiiWuyi",
     "用于链接SayuCore（早柚核心）的适配器！适用于多种游戏功能, 原神、星铁、绝区零、鸣朝、雀魂等游戏的最佳工具箱！",
-    "0.4.6",
+    "0.4.7",
 )
 class GsCoreAdapter(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
