@@ -1,6 +1,6 @@
 name: astrbot_plugin_gscore_adapter
 desc: 用于链接SayuCore（早柚核心）的适配器！适用于多种游戏功能, 原神、星铁、鸣朝、雀魂等游戏的最佳工具箱！
 help: 输入 /core帮助 查看关键词回复帮助。
-version: v0.4.6
+version: v0.4.7
 author: KimigaiiWuyi
 repo: https://github.com/KimigaiiWuyi/astrbot_plugin_gscore_adapter
