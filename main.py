@@ -55,6 +55,7 @@ class GsCoreAdapter(Star):
             if isinstance(prefix, str) and prefix
         ]
         self.MAX_RETRY_TIMES = getattr(self.config, "MAX_RETRY_TIMES", 30)
+        self.PROTOCOL = "wss" if self.config.SSL else "ws"
 
     def _is_gscore_only_message(self, event: AstrMessageEvent) -> bool:
         if not self.GSCORE_ONLY_PREFIXES:
@@ -74,7 +75,7 @@ class GsCoreAdapter(Star):
         self,
     ):
         self.is_alive = True
-        self.ws_url = f"ws://{self.IP}:{self.PORT}/ws/{self.BOT_ID}"
+        self.ws_url = f"{self.PROTOCOL}://{self.IP}:{self.PORT}/ws/{self.BOT_ID}"
         if self.WS_TOKEN:
             self.ws_url += f"?token={self.WS_TOKEN}"
 
@@ -322,7 +323,7 @@ class GsCoreAdapter(Star):
                         f"[GsCore] 已达到最大重试次数 ({self.MAX_RETRY_TIMES})，停止重试连接"
                     )
                     break
-                
+
                 await asyncio.sleep(5)
                 try:
                     await self.async_connect()

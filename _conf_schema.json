@@ -11,6 +11,11 @@
         "hint": "默认应为8765",
         "default": "8765"
     },
+    "SSL": {
+        "description": "是否启用SSL连接GsCore",
+        "type": "bool",
+        "hint": "默认False，启用后会使用wss协议连接GsCore"
+    },
     "BOT_ID": {
         "description": "向GsCore注册自身的Bot",
         "type": "string",
