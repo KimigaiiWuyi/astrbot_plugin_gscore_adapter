@@ -146,6 +146,32 @@ class GsCoreAdapter(Star):
 
         return any(raw_text.startswith(prefix) for prefix in self.GSCORE_ONLY_PREFIXES)
 
+    async def _convert_file(self, file_msg: File) -> GsMessage | None:
+        logger.debug(f"[GsCore] 转换文件消息: {file_msg}")
+        name = str(file_msg.name or "file")
+
+        url = getattr(file_msg, "url", None)
+        if isinstance(url, str) and url.startswith("http"):
+            return GsMessage(type="file", data=f"{name}|{url}")
+
+        for attr in ("file_", "url"):
+            val = getattr(file_msg, attr, None)
+            if isinstance(val, str) and val.startswith("base64://"):
+                return GsMessage(type="file", data=f"{name}|{val}")
+
+        file_path = getattr(file_msg, "file_", None)
+        if not file_path:
+            logger.warning(f"[GsCore] 文件消息缺少路径: {file_msg}")
+            return None
+
+        path = Path(str(file_path))
+        if not path.exists():
+            logger.warning(f"[GsCore] 文件不存在: {file_path}")
+            return None
+
+        file_val = await file_to_base64(path)
+        return GsMessage(type="file", data=f"{name}|{file_val}")
+
     async def _convert_image(self, image_msg: Image) -> GsMessage | None:
         logger.debug(f"[GsCore] 转换图片消息: {image_msg}")
         img_path = getattr(image_msg, "url", None) or getattr(image_msg, "path", None)
@@ -383,11 +409,8 @@ class GsCoreAdapter(Star):
             image_data = await self._convert_image(msg)
             return [image_data] if image_data else []
         if isinstance(msg, File):
-            if msg.file_:
-                file_val = await file_to_base64(Path(msg.file_))
-            else:
-                file_val = msg.url or ""
-            return [GsMessage(type="file", data=f"{msg.name or 'file'}|{file_val}")]
+            file_data = await self._convert_file(msg)
+            return [file_data] if file_data else []
         if isinstance(msg, Plain):
             return [GsMessage(type="text", data=msg.text)]
         if isinstance(msg, At):
@@ -419,6 +442,12 @@ class GsCoreAdapter(Star):
                 quoted_nodes: list[GsMessage] = []
                 for reply_msg in msg.chain or []:
                     if isinstance(reply_msg, Image):
+                        quoted_context.extend(
+                            await self._build_single_content(
+                                reply_msg, event, from_reply=True
+                            )
+                        )
+                    elif isinstance(reply_msg, File):
                         quoted_context.extend(
                             await self._build_single_content(
                                 reply_msg, event, from_reply=True
