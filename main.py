@@ -4,7 +4,8 @@
 - 插件生命周期: 加载即建立与 core 的 WS 连接, 卸载/重载时优雅断开;
 - 监听 AstrBot 全部消息事件, 转换为 MessageReceive 上报 core;
 - 监听平台元事件(进群/退群/戳一戳), 单独成包上报(见 meta_event.py);
-- GSCORE_ONLY_PREFIXES 命中时拦截 AstrBot 后续 LLM 流程.
+- GSCORE_ONLY_PREFIXES 命中时拦截 AstrBot 后续 LLM 流程; 打开
+  GSCORE_ONLY_PREFIXES_STRICT 后改为白名单: 只有命中前缀的消息才上报 core.
 
 协议侧(连接/下发/回执/控制包)见 client.py 与 send_utils.py.
 """
@@ -59,6 +60,18 @@ def _cfg_int(config: AstrBotConfig, key: str, default: int) -> int:
         return default
 
 
+def _cfg_bool(config: AstrBotConfig, key: str, default: bool) -> bool:
+    """从配置读取布尔项; WebUI 可能存成字符串, 统一收窄."""
+    val = config.get(key)
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, str):
+        return val.strip().lower() in ("true", "1", "yes", "on")
+    if isinstance(val, int | float):
+        return bool(val)
+    return default
+
+
 def _cfg_str_list(config: AstrBotConfig, key: str) -> list[str]:
     """从配置读取字符串列表项, 过滤空串与非字符串元素."""
     val = config.get(key)
@@ -95,7 +108,7 @@ def _onebot_temp_group_id(event: AstrMessageEvent) -> str:
     PLUGIN_NAME,
     "KimigaiiWuyi",
     "用于链接SayuCore（早柚核心）的适配器！适用于多种游戏功能, 原神、星铁、绝区零、鸣朝、雀魂等游戏的最佳工具箱！",
-    "0.5.6",
+    "0.5.8",
 )
 class GsCoreAdapter(Star):
     def __init__(self, context: Context, config: AstrBotConfig) -> None:
@@ -103,6 +116,9 @@ class GsCoreAdapter(Star):
         self.config: AstrBotConfig = config
         self.GSCORE_ONLY_PREFIXES: list[str] = _cfg_str_list(
             config, "GSCORE_ONLY_PREFIXES"
+        )
+        self.GSCORE_ONLY_PREFIXES_STRICT: bool = _cfg_bool(
+            config, "GSCORE_ONLY_PREFIXES_STRICT", False
         )
 
         self.temp_dir: Path = StarTools.get_data_dir(PLUGIN_NAME) / "temp"
@@ -163,6 +179,17 @@ class GsCoreAdapter(Star):
             return True
         nxt = text[len(p)]
         return not (nxt.isascii() and (nxt.isalnum() or nxt == "_"))
+
+    def _strict_only(self) -> bool:
+        """是否启用"仅转发命中前缀的消息"模式(默认关闭).
+
+        关闭(默认): 所有消息都转发给 core, 命中前缀只是额外 stop_event 拦 AstrBot LLM;
+        打开: 只有命中前缀的消息转发给 core, 未命中的不再转发(交回 AstrBot 处理)。
+        前缀列表为空时不宜开白名单(会一条都不转发), 这里直接视为关闭。
+        """
+        if not self.GSCORE_ONLY_PREFIXES:
+            return False
+        return self.GSCORE_ONLY_PREFIXES_STRICT
 
     @staticmethod
     def _strip_leading_mentions(text: str) -> str:
@@ -561,6 +588,10 @@ class GsCoreAdapter(Star):
 
         # 前缀判定必须在任何提前返回/异常之前定下来, 否则"该拦不拦"会漏
         gscore_only = self._is_gscore_only_message(event)
+        if not gscore_only and self._strict_only():
+            # 白名单模式: 未命中前缀的消息不转发给 core, 交回 AstrBot 正常处理
+            return
+
         try:
             await self._report_message(event, bot_id, platform_id, pm)
         finally:

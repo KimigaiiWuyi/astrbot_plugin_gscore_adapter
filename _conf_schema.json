@@ -23,8 +23,14 @@
         "hint": "WsToken",
         "default": ""
     },
+    "GSCORE_ONLY_PREFIXES_STRICT": {
+        "description": "仅转发命中前缀的消息",
+        "type": "bool",
+        "hint": "打开后只有命中前缀的消息转发给GsCore，其余消息不转发",
+        "default": false
+    },
     "GSCORE_ONLY_PREFIXES": {
-        "description": "仅转发到GsCore且拦截AstrBot后续LLM的触发前缀列表",
+        "description": "拦截AstrBot回复的触发前缀",
         "type": "list",
         "hint": "例如: core, gs, sr, zzz, ww，每条输入后回车",
         "default": []
