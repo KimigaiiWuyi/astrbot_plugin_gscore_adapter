@@ -4,7 +4,8 @@
 - 插件生命周期: 加载即建立与 core 的 WS 连接, 卸载/重载时优雅断开;
 - 监听 AstrBot 全部消息事件, 转换为 MessageReceive 上报 core;
 - 监听平台元事件(进群/退群/戳一戳), 单独成包上报(见 meta_event.py);
-- GSCORE_ONLY_PREFIXES 命中时拦截 AstrBot 后续 LLM 流程.
+- GSCORE_ONLY_PREFIXES 命中时拦截 AstrBot 后续 LLM 流程; 打开
+  GSCORE_ONLY_PREFIXES_STRICT 后改为白名单: 只有命中前缀的消息才上报 core.
 
 协议侧(连接/下发/回执/控制包)见 client.py 与 send_utils.py.
 """
@@ -59,6 +60,18 @@ def _cfg_int(config: AstrBotConfig, key: str, default: int) -> int:
         return default
 
 
+def _cfg_bool(config: AstrBotConfig, key: str, default: bool) -> bool:
+    """从配置读取布尔项; WebUI 可能存成字符串, 统一收窄."""
+    val = config.get(key)
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, str):
+        return val.strip().lower() in ("true", "1", "yes", "on")
+    if isinstance(val, int | float):
+        return bool(val)
+    return default
+
+
 def _cfg_str_list(config: AstrBotConfig, key: str) -> list[str]:
     """从配置读取字符串列表项, 过滤空串与非字符串元素."""
     val = config.get(key)
@@ -95,7 +108,7 @@ def _onebot_temp_group_id(event: AstrMessageEvent) -> str:
     PLUGIN_NAME,
     "KimigaiiWuyi",
     "用于链接SayuCore（早柚核心）的适配器！适用于多种游戏功能, 原神、星铁、绝区零、鸣朝、雀魂等游戏的最佳工具箱！",
-    "0.5.6",
+    "0.5.8",
 )
 class GsCoreAdapter(Star):
     def __init__(self, context: Context, config: AstrBotConfig) -> None:
@@ -103,6 +116,9 @@ class GsCoreAdapter(Star):
         self.config: AstrBotConfig = config
         self.GSCORE_ONLY_PREFIXES: list[str] = _cfg_str_list(
             config, "GSCORE_ONLY_PREFIXES"
+        )
+        self.GSCORE_ONLY_PREFIXES_STRICT: bool = _cfg_bool(
+            config, "GSCORE_ONLY_PREFIXES_STRICT", False
         )
 
         self.temp_dir: Path = StarTools.get_data_dir(PLUGIN_NAME) / "temp"
@@ -136,15 +152,89 @@ class GsCoreAdapter(Star):
         except OSError as e:
             logger.warning(f"[GsCore] 清理临时目录失败: {e}")
 
-    def _is_gscore_only_message(self, event: AstrMessageEvent) -> bool:
+    def _plain_text(self, event: AstrMessageEvent) -> str:
+        """取消息的纯文本正文.
+
+        直接读 `event.message_str` 会被平台适配器注入的 @ 文本污染: aiocqhttp 把
+        "非第一个 @"拼成 ` @昵称(qq) ` 塞进 message_str, 导致 `@bot @别人 gs帮助`
+        无法命中前缀. 这里只拼接 Plain 段来绕开; 拿不到 Plain 段时回退 message_str.
+        """
+        text = "".join(
+            str(comp.text) for comp in event.get_messages() if isinstance(comp, Plain)
+        )
+        return (text or event.message_str).strip()
+
+    @staticmethod
+    def _match_prefix(text: str, prefix: str) -> bool:
+        """前缀匹配: 忽略大小写, 且要求前缀后不是 ASCII 字母/数字/下划线.
+
+        这样 `gs帮助` / `gs 查一下` / `GS帮助` 命中, 而 `srds` / `wwww` / `ysd` /
+        `coreldraw` 这类无关日常用语不会被误判成 core 消息.
+        """
+        text = text.lower()
+        p = prefix.strip().lower()
+        if not p or not text.startswith(p):
+            return False
+        if len(text) == len(p):
+            return True
+        nxt = text[len(p)]
+        return not (nxt.isascii() and (nxt.isalnum() or nxt == "_"))
+
+    def _strict_only(self) -> bool:
+        """是否启用"仅转发命中前缀的消息"模式(默认关闭).
+
+        关闭(默认): 所有消息都转发给 core, 命中前缀只是额外 stop_event 拦 AstrBot LLM;
+        打开: 只有命中前缀的消息转发给 core, 未命中的不再转发(交回 AstrBot 处理)。
+        前缀列表为空时不宜开白名单(会一条都不转发), 这里直接视为关闭。
+        """
         if not self.GSCORE_ONLY_PREFIXES:
             return False
+        return self.GSCORE_ONLY_PREFIXES_STRICT
 
-        raw_text = event.message_str.lstrip()
-        if not raw_text:
+    @staticmethod
+    def _strip_leading_mentions(text: str) -> str:
+        """剥掉正文开头连续出现的 @xxx 文本.
+
+        部分平台把 @机器人 直接写进纯文本, 正文会以 `@bot 正文` 形式出现; 官方机器人
+        适配器则会剥掉它并保留独立的 At 段.
+        """
+        while text.startswith("@"):
+            parts = text.split(None, 1)
+            if len(parts) == 1:
+                return ""
+            text = parts[1].lstrip()
+        return text
+
+    def _candidate_texts(self, event: AstrMessageEvent) -> list[str]:
+        """列出可用于前缀匹配的候选正文(去重, 已剥掉开头的 @xxx).
+
+        两个来源都要看:
+        1. Plain 段拼接 —— 绕开 aiocqhttp 注入的 ` @昵称(qq) ` 污染;
+        2. `event.message_str` —— AstrBot 已剥掉唤醒前缀(如 `/`), 而 Plain 段仍是
+           `"/gs帮助"` 原文, 只看 Plain 会漏掉这一类写法。
+        """
+        plain = self._strip_leading_mentions(self._plain_text(event))
+        message_str = self._strip_leading_mentions(
+            str(getattr(event, "message_str", "") or "").strip()
+        )
+        texts: list[str] = []
+        for text in (plain, message_str):
+            if text and text not in texts:
+                texts.append(text)
+        return texts
+
+    def _is_gscore_only_message(self, event: AstrMessageEvent) -> bool:
+        prefixes = self.GSCORE_ONLY_PREFIXES
+        if not prefixes:
             return False
 
-        return any(raw_text.startswith(prefix) for prefix in self.GSCORE_ONLY_PREFIXES)
+        texts = self._candidate_texts(event)
+        if not texts:
+            return False
+
+        return any(
+            self._match_prefix(text, prefix) for text in texts for prefix in prefixes
+        )
 
     async def _convert_file(self, file_msg: File) -> GsMessage | None:
         logger.debug(f"[GsCore] 转换文件消息: {file_msg}")
@@ -496,6 +586,32 @@ class GsCoreAdapter(Star):
             await self.client.report(meta_msg)
             return
 
+        # 前缀判定必须在任何提前返回/异常之前定下来, 否则"该拦不拦"会漏
+        gscore_only = self._is_gscore_only_message(event)
+        if not gscore_only and self._strict_only():
+            # 白名单模式: 未命中前缀的消息不转发给 core, 交回 AstrBot 正常处理
+            return
+
+        try:
+            await self._report_message(event, bot_id, platform_id, pm)
+        finally:
+            if gscore_only:
+                # 按 AstrBot 文档显式阻断事件传播, 不参与后续 LLM 等流程;
+                # 上报失败也要拦, 否则 AstrBot 会替 core 抢答
+                event.stop_event()
+                logger.info(
+                    "[GsCore] 当前消息命中GSCORE_ONLY_PREFIXES，已调用 stop_event() 拦截后续 AstrBot LLM 流程"
+                )
+
+    async def _report_message(
+        self,
+        event: AstrMessageEvent,
+        bot_id: str,
+        platform_id: str,
+        pm: int,
+    ) -> None:
+        """把普通消息打包上报 core."""
+        pn = event.get_platform_name()
         content = await self._build_content(event)
         if not content:
             return
@@ -531,13 +647,6 @@ class GsCoreAdapter(Star):
         )
         logger.info(f"【发送】[gsuid-core]: {msg.bot_id}")
         await self.client.report(msg)
-
-        if self._is_gscore_only_message(event):
-            # 按 AstrBot 文档显式阻断事件传播, 不参与后续 LLM 等流程
-            event.stop_event()
-            logger.info(
-                "[GsCore] 当前消息命中GSCORE_ONLY_PREFIXES，已调用 stop_event() 拦截后续 AstrBot LLM 流程"
-            )
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("连接core", alias={"链接core"})
