@@ -6,6 +6,7 @@
 - 监听平台元事件(进群/退群/戳一戳), 单独成包上报(见 meta_event.py);
 - GSCORE_ONLY_PREFIXES 命中时拦截 AstrBot 后续 LLM 流程; 打开
   GSCORE_ONLY_PREFIXES_STRICT 后改为白名单: 只有命中前缀的消息才上报 core.
+  前缀按纯前缀匹配(忽略大小写).
 
 协议侧(连接/下发/回执/控制包)见 client.py 与 send_utils.py.
 """
@@ -108,7 +109,7 @@ def _onebot_temp_group_id(event: AstrMessageEvent) -> str:
     PLUGIN_NAME,
     "KimigaiiWuyi",
     "用于链接SayuCore（早柚核心）的适配器！适用于多种游戏功能, 原神、星铁、绝区零、鸣朝、雀魂等游戏的最佳工具箱！",
-    "0.5.8",
+    "0.5.9",
 )
 class GsCoreAdapter(Star):
     def __init__(self, context: Context, config: AstrBotConfig) -> None:
@@ -166,19 +167,10 @@ class GsCoreAdapter(Star):
 
     @staticmethod
     def _match_prefix(text: str, prefix: str) -> bool:
-        """前缀匹配: 忽略大小写, 且要求前缀后不是 ASCII 字母/数字/下划线.
-
-        这样 `gs帮助` / `gs 查一下` / `GS帮助` 命中, 而 `srds` / `wwww` / `ysd` /
-        `coreldraw` 这类无关日常用语不会被误判成 core 消息.
-        """
+        """前缀匹配: 忽略大小写, 只要开头一致就算命中."""
         text = text.lower()
         p = prefix.strip().lower()
-        if not p or not text.startswith(p):
-            return False
-        if len(text) == len(p):
-            return True
-        nxt = text[len(p)]
-        return not (nxt.isascii() and (nxt.isalnum() or nxt == "_"))
+        return bool(p) and text.startswith(p)
 
     def _strict_only(self) -> bool:
         """是否启用"仅转发命中前缀的消息"模式(默认关闭).

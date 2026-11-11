@@ -18,6 +18,7 @@
   - 打开后只有命中前缀的消息转发给 GsCore，其余消息不转发。
 - `GSCORE_ONLY_PREFIXES`：拦截 AstrBot 回复的触发前缀，示例 `["core", "gs", "sr", "zzz", "ww"]`。
   - 当用户消息文本命中这些前缀时，消息仅会发送给 GsCore，并显式调用 `event.stop_event()` 阻断后续 LLM 流程。
+  - 匹配规则是**纯前缀匹配**（忽略大小写）。
 
 ## v0.5.0 新特性
 
