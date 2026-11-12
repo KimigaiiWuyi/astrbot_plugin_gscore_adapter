@@ -174,6 +174,7 @@ async def gs_to_components(
     node(合并转发)仅 onebot 走原生 Nodes, 其余平台展开逐段发送;
     image_size 仅供 QQ 官方 bot markdown 使用, 不能当成文本/空转发节点发出;
     group 是路由段, 不当消息发送;
+    card 仅支持入站；
     excute_ban_user 段为控制语义, 就地执行禁言后不进消息链.
     """
     message: list[BaseMessageComponent] = []
@@ -227,6 +228,11 @@ async def gs_to_components(
             message.append(At(qq=_c.data))
         elif _c.type in {"reply", "reply_id"}:
             message.append(Reply(id=str(_c.data)))
+        elif _c.type == "card":
+            card_type = _c.data.get("type") if isinstance(_c.data, dict) else None
+            logger.info(
+                f"[GsCore] 协议端发不出卡片, 该段已跳过 (type={card_type or '未知'})"
+            )
         elif _c.type == "excute_ban_user":
             await execute_ban_user(platform, _c.data)
         else:

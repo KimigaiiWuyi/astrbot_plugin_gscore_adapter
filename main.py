@@ -11,12 +11,14 @@
 """
 
 import asyncio
+import json
 from base64 import b64encode
 from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import override
+from typing import Any, override
 
 import aiofiles
+
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, MessageEventResult, filter
 from astrbot.api.star import Context, Star, StarTools, register
@@ -25,6 +27,7 @@ from astrbot.core.message.components import (
     File,
     Forward,
     Image,
+    Json,
     Node,
     Nodes,
     Plain,
@@ -285,6 +288,73 @@ class GsCoreAdapter(Star):
         base64_data = b64encode(img_data).decode("utf-8")
         return GsMessage(type="image", data=f"base64://{base64_data}")
 
+    def _load_card(self, data: object) -> dict[str, Any] | None:
+        """把 AstrBot Json 段的 data 归一成卡片 dict; 非法内容返回 None."""
+        if isinstance(data, dict):
+            return data
+        if not isinstance(data, str) or not data:
+            return None
+        try:
+            card = json.loads(data)
+        except ValueError:
+            return None
+        return card if isinstance(card, dict) else None
+
+    def _card_text(self, card: dict[str, Any] | None) -> str:
+        """提取卡片标题/描述/链接, 供 core 命令匹配与历史记录使用."""
+        if card is None:
+            return "[卡片]"
+
+        prompt = card.get("prompt")
+        prompt = prompt.strip() if isinstance(prompt, str) else ""
+        title = self._card_field(card, "title")
+        desc = self._card_field(card, "desc")
+        url = self._card_field(card, "jumpUrl", "qqdocurl", "url")
+
+        lines: list[str] = []
+        for item in (prompt, title, desc):
+            if item and not item.isdigit() and item not in lines:
+                lines.append(item)
+        if url and not any(url in line for line in lines):
+            lines.append(url)
+        return "\n".join(lines) or "[卡片]"
+
+    def _card_field(
+        self,
+        payload: object,
+        *keys: str,
+        depth: int = 4,
+    ) -> str:
+        """按字段名在嵌套 dict/list 中查找第一个非空字符串."""
+        if depth <= 0:
+            return ""
+        if isinstance(payload, dict):
+            for key in keys:
+                value = payload.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+            children: object = payload.values()
+        elif isinstance(payload, list):
+            children = payload
+        else:
+            return ""
+        for child in children:
+            found = self._card_field(child, *keys, depth=depth - 1)
+            if found:
+                return found
+        return ""
+
+    def _convert_card(self, card_msg: Json) -> list[GsMessage]:
+        """把 AstrBot Json 卡片段转换为 core 的 card 段与文本兜底."""
+        logger.debug(f"[GsCore] 转换卡片消息: {card_msg}")
+        card = self._load_card(card_msg.data)
+        if card is None:
+            return [GsMessage(type="text", data="[卡片]")]
+        return [
+            GsMessage(type="card", data={"type": "json", "content": card}),
+            GsMessage(type="text", data=self._card_text(card)),
+        ]
+
     def _reply_text(self, reply: Reply) -> str:
         """引用正文：优先平台解析好的纯文本，否则拼 chain 里的 Plain."""
         if reply.message_str:
@@ -312,6 +382,8 @@ class GsCoreAdapter(Star):
                 lines.append("[视频]")
             elif item.type == "file":
                 lines.append("[文件]")
+            elif item.type == "card":
+                lines.append("[卡片]")
         return "\n".join(lines)
 
     async def _parse_ob_forward(
@@ -393,6 +465,9 @@ class GsCoreAdapter(Star):
                     items.append(GsMessage(type="image", data=str(url)))
             elif typ == "at" and "qq" in data:
                 items.append(GsMessage(type="at", data=str(data["qq"])))
+            elif typ == "json":
+                raw = data["data"] if "data" in data else data
+                items.extend(self._convert_card(Json(data=raw)))
             elif typ in {"forward", "forward_msg"}:
                 fid = self._forward_id_from_dict(data)
                 if fid:
@@ -509,6 +584,8 @@ class GsCoreAdapter(Star):
             return [await self._forward_to_node(msg, event)]
         if isinstance(msg, (Node, Nodes)):
             return [await self._nodes_to_node(msg, event)]
+        if isinstance(msg, Json):
+            return self._convert_card(msg)
 
         # 引用消息内经常会带 Json/Face 等 core 不消费的消息段；这些不应阻止
         # 当前消息里的命令文本继续上报。
@@ -543,6 +620,13 @@ class GsCoreAdapter(Star):
                                 reply_msg, event, from_reply=True
                             )
                         )
+                    elif isinstance(reply_msg, Json):
+                        card_text = self._card_text(self._load_card(reply_msg.data))
+                        if card_text and card_text not in reply_text:
+                            if not reply_text or reply_text == "[卡片]":
+                                reply_text = card_text
+                            else:
+                                reply_text = f"{reply_text}\n{card_text}"
                     elif isinstance(reply_msg, Forward):
                         node = await self._forward_to_node(reply_msg, event)
                         quoted_nodes.append(node)
