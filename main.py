@@ -300,19 +300,16 @@ class GsCoreAdapter(Star):
             return None
         return card if isinstance(card, dict) else None
 
-    def _card_text(self, card: dict[str, Any] | None) -> str:
-        """提取卡片标题/描述/链接, 供 core 命令匹配与历史记录使用."""
-        if card is None:
-            return "[卡片]"
-
+    def _card_text(self, card: dict[str, Any]) -> str:
+        """提取卡片正文, 供 core 命令匹配与历史记录使用."""
         prompt = card.get("prompt")
         prompt = prompt.strip() if isinstance(prompt, str) else ""
         title = self._card_field(card, "title")
         desc = self._card_field(card, "desc")
-        url = self._card_field(card, "jumpUrl", "qqdocurl", "url")
+        url = self._card_field(card, "jumpUrl", "qqdocurl")
 
         lines: list[str] = []
-        for item in (prompt, title, desc):
+        for item in (prompt or title, desc):
             if item and not item.isdigit() and item not in lines:
                 lines.append(item)
         if url and not any(url in line for line in lines):
@@ -621,7 +618,8 @@ class GsCoreAdapter(Star):
                             )
                         )
                     elif isinstance(reply_msg, Json):
-                        card_text = self._card_text(self._load_card(reply_msg.data))
+                        card = self._load_card(reply_msg.data)
+                        card_text = self._card_text(card) if card else ""
                         if card_text and card_text not in reply_text:
                             if not reply_text or reply_text == "[卡片]":
                                 reply_text = card_text
