@@ -36,6 +36,7 @@ from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import (
 )
 from astrbot.core.star.context import Context
 from astrbot.core.utils.media_utils import file_uri_to_path, is_file_uri
+from botpy.types.message import MarkdownPayload
 
 from .models import Message as GsMessage
 from .models import MessageSend
@@ -426,6 +427,16 @@ async def qqofficial_send(
     helper = SimpleNamespace(bot=bot)
     payload: dict[str, Any] = {"content": plain_text, "msg_id": msg_id}
 
+    # 与上游 _send_by_session_common 对齐: markdown 模式下必须显式传 msg_type=2,否则 botpy 的 post_group_message 默认 msg_type=0(纯文本), 服务端不会把 <qqbot-at-user> 等富文本标记渲染成 @, 而是原样输出字面量。
+    _use_md = getattr(chain, "use_markdown_", None)
+    if _use_md is None:
+        _use_md = getattr(adapter, "use_markdown_default", True)
+    if _use_md:
+        payload["markdown"] = MarkdownPayload(content=plain_text)
+        payload["msg_type"] = 2
+        # markdown 消息要求 content 为空, 否则服务端判定类型与内容不匹配
+        payload.pop("content", None)
+
     if is_group:
         scene = adapter._session_scene.get(session_id)  # pyright: ignore[reportPrivateUsage]
         if scene == "group":
@@ -440,6 +451,7 @@ async def qqofficial_send(
                     group_openid=session_id,
                 )
                 payload["msg_type"] = 7
+                payload.pop("markdown", None)
             if record_file_path:
                 media = await QQOfficialMessageEvent.upload_group_and_c2c_media(
                     helper,  # type: ignore[arg-type]
@@ -450,6 +462,7 @@ async def qqofficial_send(
                 if media:
                     payload["media"] = media
                     payload["msg_type"] = 7
+                    payload.pop("markdown", None)
             if video_file_source:
                 media = await QQOfficialMessageEvent.upload_group_and_c2c_media(
                     helper,  # type: ignore[arg-type]
@@ -460,6 +473,7 @@ async def qqofficial_send(
                 if media:
                     payload["media"] = media
                     payload["msg_type"] = 7
+                    payload.pop("markdown", None)
                     payload.pop("msg_id", None)
             if file_source:
                 media = await QQOfficialMessageEvent.upload_group_and_c2c_media(
@@ -472,6 +486,7 @@ async def qqofficial_send(
                 if media:
                     payload["media"] = media
                     payload["msg_type"] = 7
+                    payload.pop("markdown", None)
                     payload.pop("msg_id", None)
             _ = await bot.api.post_group_message(group_openid=session_id, **payload)
         else:
@@ -489,6 +504,7 @@ async def qqofficial_send(
                 openid=session_id,
             )
             payload["msg_type"] = 7
+            payload.pop("markdown", None)
         if record_file_path:
             media = await QQOfficialMessageEvent.upload_group_and_c2c_media(
                 helper,  # type: ignore[arg-type]
@@ -499,6 +515,7 @@ async def qqofficial_send(
             if media:
                 payload["media"] = media
                 payload["msg_type"] = 7
+                payload.pop("markdown", None)
         if video_file_source:
             media = await QQOfficialMessageEvent.upload_group_and_c2c_media(
                 helper,  # type: ignore[arg-type]
@@ -509,6 +526,7 @@ async def qqofficial_send(
             if media:
                 payload["media"] = media
                 payload["msg_type"] = 7
+                payload.pop("markdown", None)
         if file_source:
             media = await QQOfficialMessageEvent.upload_group_and_c2c_media(
                 helper,  # type: ignore[arg-type]
@@ -520,6 +538,7 @@ async def qqofficial_send(
             if media:
                 payload["media"] = media
                 payload["msg_type"] = 7
+                payload.pop("markdown", None)
         _ = await QQOfficialMessageEvent.post_c2c_message(
             helper,  # type: ignore[arg-type]
             openid=session_id,
