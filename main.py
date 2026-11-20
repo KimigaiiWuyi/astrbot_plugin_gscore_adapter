@@ -690,10 +690,11 @@ class GsCoreAdapter(Star):
         if not content:
             return
 
-        self_id = event.get_self_id()
         user_id = str(event.get_sender_id())
         if pn == "qq_official":
-            avatar = f"https://q.qlogo.cn/qqapp/{self_id}/{user_id}/100"
+            platform = self.context.get_platform_inst(platform_id)
+            appid = str(getattr(platform, "appid", "") or "")
+            avatar = f"https://q.qlogo.cn/qqapp/{appid}/{user_id}/100" if appid else ""
         elif pn == "aiocqhttp":
             avatar = f"https://q1.qlogo.cn/g?b=qq&nk={user_id}&s=640"
         else:
